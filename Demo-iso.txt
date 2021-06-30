@@ -1,0 +1,50 @@
+#copy the OneAPI samples to local directory
+https://github.com/oneapi-src/oneAPI-samples.git
+
+
+
+#Build ISO3DFD:
+
+icpc -DDT=0.002f -DDXYZ=50.0f -DHALF_LENGTH=8 -O2 -g -xCORE-AVX2  -qopenmp iso-3dfd_parallel.cc iso-3dfd_main.cc -o iso-3dfd_cpu
+
+
+#Run Offload Modelling:
+
+advixe-python /opt/intel/oneapi/advisor/latest/perfmodels/run_oa.py --verbose 3 --config dg1 --markup omp --collect basic -project-dir ./oa_report_iso_dg1 -- ./iso-3dfd_cpu 
+
+
+#Buils dpcpp version:
+
+dpcpp -g -O2 -fsycl -std=c++11 utils.cpp set_selector.cpp iso3dfd_kernels.cpp print_device.cpp create_queue.cpp iso3dfd.cpp
+
+
+#Get DG1 node
+
+qsub -I -l nodes=1:iris_xe_max:dual_gpu:ppn=2
+
+#There will be 2 cards on 1 node. We need to run binary and launch advisor on same card/device
+
+advisor --help collect | grep target-gpu
+
+
+#Run GPU roofline analysis:
+
+SYCL_DEVICE_FILTER=gpu:0 ADVIXE_TARGET_GPU=0:28:0.0 advixe-cl -collect=roofline -project-dir=./iso_gpu_roof --profile-gpu -- ./a.out 256 256 256 4 2 2 10 gpu
+
+#Generate html report:
+
+advixe-cl --report=roofline --gpu --project-dir=./iso_gpu_roof/ --report-output=./roofline.html
+
+
+#Run Vtune gpu analysis on gen9
+vtune -c gpu-hotspots -- ./a.out 256 256 256 4 2 2 10 gpu
+
+#Run Vtune gpu analysis on DG1
+vtune -c gpu-hotspots -knob target-gpu=0:28:0.0  -- ./a.out 256 256 256 4 2 2 10 gpu
+
+#Zip the result file and open it on local machine where VTune GUI is available
+zip -r <name>.zip <result_folder>
+
+#Run GPU offload analysis:
+
+vtune -c gpu-offload -- ./a.out 256 256 256 4 2 2 10 gpu
